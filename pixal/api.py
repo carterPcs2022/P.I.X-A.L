@@ -1,12 +1,15 @@
 """Standalone P.I.X.A.L. HTTP API."""
 from contextlib import asynccontextmanager
+import base64
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from .behavior import derive_behavior
 from .runtime import PixalRuntime
+from .voice import PixalVoice
 
 
 runtime = PixalRuntime()
+voice = PixalVoice()
 
 
 @asynccontextmanager
@@ -29,7 +32,7 @@ def root() -> dict:
         "system": "P.I.X.A.L.",
         "status": "online",
         "version": "0.2.0",
-        "endpoints": ["/health", "/ready", "/diagnostics", "/state", "/process"],
+        "endpoints": ["/health", "/ready", "/diagnostics", "/state", "/process", "/speak"],
     }
 
 
@@ -51,6 +54,7 @@ def ready() -> dict:
         "system": "P.I.X.A.L.",
         "memory": diagnostics["memory"],
         "knowledge": diagnostics["knowledge_items"],
+        "voice": diagnostics["voice_configured"],
     }
 
 
@@ -73,6 +77,26 @@ def process(payload: dict) -> dict:
 def safety_check(payload: dict) -> dict:
     result = runtime.process(str(payload.get("text", "")))
     return {"allowed": result["allowed"], "reason": result["reason"]}
+
+
+@app.post("/speak")
+def speak(payload: dict) -> dict:
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if not voice.configured:
+        raise HTTPException(status_code=503, detail="P.I.X.A.L. voice is not configured")
+    try:
+        audio = voice.synthesize(text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="Voice synthesis failed") from exc
+    if not audio:
+        raise HTTPException(status_code=502, detail="Voice synthesis returned no audio")
+    return {
+        "system": "P.I.X.A.L.",
+        "audio_base64": base64.b64encode(audio).decode("ascii"),
+        "audio_format": voice.output_format,
+    }
 
 
 @app.get("/memory/recent")
