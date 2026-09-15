@@ -6,7 +6,6 @@ in-process MemoryStore instead of failing startup.
 """
 from __future__ import annotations
 
-import json
 import os
 import time
 from types import SimpleNamespace
@@ -46,13 +45,18 @@ class _TursoClient:
         return {"type": "text", "value": str(value)}
 
     def execute(self, sql: str, args: Iterable[Any] = ()) -> Any:
-        payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": [self._arg(v) for v in args]}}, {"type": "close"}]}
+        payload = {
+            "requests": [
+                {"type": "execute", "stmt": {"sql": sql, "args": [self._arg(v) for v in args]}},
+                {"type": "close"},
+            ]
+        }
         response = self.client.post(self.url, json=payload, headers=self.headers)
         response.raise_for_status()
         body = response.json()
         first = body["results"][0]
         if first.get("type") != "ok":
-            raise RuntimeError(f"Turso pipeline error: {first}")
+            raise RuntimeError("Turso pipeline request failed")
         rows = []
         for row in first["response"]["result"].get("rows", []):
             rows.append([cell.get("value") if isinstance(cell, dict) else cell for cell in row])
@@ -76,6 +80,7 @@ class TursoMemoryStore(MemoryStore):
         self._client = client
         self._client.execute(_TABLE_SQL)
         self._load_remote()
+        self._trim_remote()
 
     @staticmethod
     def is_configured() -> bool:
@@ -100,13 +105,11 @@ class TursoMemoryStore(MemoryStore):
         return item
 
     def _trim_remote(self) -> None:
-        excess = max(0, len(self._items) - self.max_items)
-        if excess:
-            self._client.execute(
-                "DELETE FROM pixal_memories WHERE memory_id IN "
-                "(SELECT memory_id FROM pixal_memories ORDER BY created_at ASC LIMIT ?)",
-                (excess,),
-            )
+        self._client.execute(
+            "DELETE FROM pixal_memories WHERE memory_id NOT IN "
+            "(SELECT memory_id FROM pixal_memories ORDER BY created_at DESC LIMIT ?)",
+            (self.max_items,),
+        )
 
     def ping(self) -> float:
         started = time.monotonic()
@@ -120,14 +123,10 @@ class TursoMemoryStore(MemoryStore):
 
 
 def build_memory_store(max_items: int = 100) -> tuple[MemoryStore, str, str | None]:
-    """Return (store, mode, diagnostic).
-
-    mode is ``turso`` when durable memory is active and ``local`` otherwise.
-    """
+    """Return (store, mode, diagnostic) without failing service startup."""
     if TursoMemoryStore.is_configured():
         try:
-            store = TursoMemoryStore(max_items=max_items)
-            return store, "turso", None
+            return TursoMemoryStore(max_items=max_items), "turso", None
         except Exception as exc:  # noqa: BLE001
             return MemoryStore(max_items=max_items), "local-fallback", f"{type(exc).__name__}: {exc}"
     return MemoryStore(max_items=max_items), "local", None
