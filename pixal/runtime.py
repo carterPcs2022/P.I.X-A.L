@@ -4,29 +4,49 @@ from __future__ import annotations
 import json
 
 from .behavior import derive_behavior
+from .config import settings
 from .knowledge import KnowledgeVault
 from .memory import MemoryStore
 from .protocol import Message, PixalProtocol, Priority
 from .reasoning import ReasoningEngine
 from .safety import evaluate
 from .state import PixalState
+from .turso_memory import build_memory_store
 
 
 class PixalRuntime:
     def __init__(self) -> None:
         self.state = PixalState()
-        self.memory = MemoryStore(max_items=100)
+        self.memory, self.memory_mode, self.memory_diagnostic = build_memory_store(
+            max_items=settings.memory_max_items
+        )
         self.protocol = PixalProtocol()
         self.knowledge = KnowledgeVault()
         self._load_builtin_knowledge()
-        self.reasoning = ReasoningEngine(self.knowledge)
+        self.reasoning = ReasoningEngine(
+            self.knowledge,
+            api_key=settings.groq_api_key if settings.groq_enabled else None,
+            model=settings.groq_model,
+            timeout_s=settings.groq_timeout_s,
+        )
 
     def _load_builtin_knowledge(self) -> None:
         try:
             self.knowledge.load_json(self.knowledge.root / "core.json")
         except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
-            # The runtime remains usable even if optional knowledge is absent.
             pass
+
+    def diagnostics(self) -> dict:
+        return {
+            "system": "P.I.X.A.L.",
+            "memory": self.memory_mode,
+            "memory_diagnostic": self.memory_diagnostic,
+            "knowledge_items": len(self.knowledge.items),
+            "groq_configured": bool(settings.groq_api_key and settings.groq_enabled),
+            "groq_model": settings.groq_model if settings.groq_enabled else None,
+            "voice_configured": bool(settings.voice_api_key and settings.voice_id),
+            "state": self.state.snapshot(),
+        }
 
     def process(self, text: str) -> dict:
         text = str(text or "").strip()
@@ -64,3 +84,8 @@ class PixalRuntime:
         if reasoning:
             result["reasoning"] = reasoning.__dict__
         return result
+
+    def close(self) -> None:
+        closer = getattr(self.memory, "close", None)
+        if closer:
+            closer()
