@@ -1,5 +1,6 @@
 """Standalone P.I.X.A.L. HTTP API."""
 from fastapi import FastAPI
+from .behavior import derive_behavior
 from .runtime import PixalRuntime
 
 app = FastAPI(title="P.I.X.A.L.", version="0.1.0")
@@ -18,7 +19,7 @@ def ready() -> dict:
 
 @app.get("/state")
 def get_state() -> dict:
-    return {"state": runtime.state.snapshot(), "behavior": runtime.process("")["behavior"]}
+    return {"state": runtime.state.snapshot(), "behavior": derive_behavior(runtime.state).__dict__}
 
 
 @app.post("/process")
