@@ -1,6 +1,8 @@
 """Runtime coordinator for the standalone P.I.X.A.L. software core."""
 from __future__ import annotations
 
+import json
+
 from .behavior import derive_behavior
 from .knowledge import KnowledgeVault
 from .memory import MemoryStore
