@@ -5,6 +5,7 @@ import base64
 from fastapi import FastAPI, HTTPException
 from .behavior import derive_behavior
 from .runtime import PixalRuntime
+from .safety import evaluate
 from .voice import PixalVoice
 
 
@@ -32,7 +33,7 @@ def root() -> dict:
         "system": "P.I.X.A.L.",
         "status": "online",
         "version": "0.2.0",
-        "endpoints": ["/health", "/ready", "/diagnostics", "/state", "/process", "/speak"],
+        "endpoints": ["/health", "/ready", "/diagnostics", "/state", "/process", "/safety/check", "/speak"],
     }
 
 
@@ -75,8 +76,9 @@ def process(payload: dict) -> dict:
 
 @app.post("/safety/check")
 def safety_check(payload: dict) -> dict:
-    result = runtime.process(str(payload.get("text", "")))
-    return {"allowed": result["allowed"], "reason": result["reason"]}
+    """Pure safety preflight: evaluate only, with no memory/state/protocol side effects."""
+    decision = evaluate(str(payload.get("text", "")))
+    return {"allowed": decision.allowed, "reason": decision.reason}
 
 
 @app.post("/speak")
